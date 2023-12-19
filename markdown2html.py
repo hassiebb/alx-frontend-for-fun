@@ -1,43 +1,70 @@
 #!/usr/bin/python3
-'''
-A script that codes markdown to HTML
-'''
 import sys
 import os
+import markdown
+import hashlib
 import re
+from markdown.inlinepatterns import SimpleTagPattern
 
-if __name__ == '__main__':
+class CustomMarkdownExtension(markdown.Extension):
+    def extendMarkdown(self, md, md_globals):
+        md.inlinePatterns.register(BoldPattern(r'\*\*(.+?)\*\*'), 'bold', 175)
+        md.inlinePatterns.register(BoldPattern(r'__(.+?)__'), 'bold', 175)
+        md.inlinePatterns.register(MD5Pattern(r'\[\[(.+?)\]\]'), 'md5', 175)
+        md.inlinePatterns.register(RemoveCPattern(r'\(\((.+?)\)\)'), 'remove_c', 175)
+        md.parser.blockprocessors.register(ListProcessor(md.parser), 'custom_list', 25)
+        md.parser.blockprocessors.register(ParagraphProcessor(md.parser), 'custom_paragraph', 175)
 
-    # Test that the number of arguments passed is 2
-    if len(sys.argv[1:]) != 2:
-        print('Usage: ./markdown2html.py README.md README.html',
-              file=sys.stderr)
+class ListProcessor(markdown.blockprocessors.ListProcessor):
+    def __init__(self, parser):
+        super().__init__(parser)
+
+class ParagraphProcessor(markdown.blockprocessors.BlockProcessor):
+    def test(self, parent, block):
+        return True
+
+    def run(self, parent, blocks):
+        block = blocks.pop(0)
+        p_tag = markdown.util.etree.Element('p')
+        p_tag.text = block
+        parent.append(p_tag)
+
+class BoldPattern(SimpleTagPattern):
+    def __init__(self, pattern):
+        super().__init__(pattern, 'b')
+
+class MD5Pattern(markdown.inlinepatterns.Pattern):
+    def handleMatch(self, m):
+        text = m.group(2)
+        hashed_text = hashlib.md5(text.encode('utf-8')).hexdigest()
+        return markdown.util.etree.Element('p', attrib={'class': 'md5'}).text, f'{hashed_text}'
+
+class RemoveCPattern(markdown.inlinepatterns.Pattern):
+    def handleMatch(self, m):
+        text = m.group(2)
+        text_without_c = re.sub(r'c', '', text, flags=re.IGNORECASE)
+        return markdown.util.etree.Element('p', attrib={'class': 'remove_c'}).text, text_without_c
+
+def convert_markdown_to_html(input_file, output_file):
+    with open(input_file, 'r') as md_file:
+        md_content = md_file.read()
+
+    md_extensions = ['markdown.extensions.extra', CustomMarkdownExtension()]
+    html_content = markdown.markdown(md_content, extensions=md_extensions)
+
+    with open(output_file, 'w') as html_file:
+        html_file.write(html_content)
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        sys.stderr.write("Usage: ./markdown2html.py <input_file.md> <output_file.html>\n")
         sys.exit(1)
 
-    # Store the arguments into variables
     input_file = sys.argv[1]
     output_file = sys.argv[2]
 
-    # Checks that the markdown file exists and is a file
-    if not (os.path.exists(input_file) and os.path.isfile(input_file)):
-        print(f'Missing {input_file}', file=sys.stderr)
+    if not os.path.exists(input_file):
+        sys.stderr.write(f"Missing {input_file}\n")
         sys.exit(1)
 
-    with open(input_file, encoding='utf-8') as file_1:
-        html_content = []
-        md_content = [line[:-1] for line in file_1.readlines()]
-        for line in md_content:
-            heading = re.split(r'#{1,6} ', line)
-            if len(heading) > 1:
-                # Compute the number of the # present to
-                # determine heading level
-                h_level = len(line[:line.find(heading[1])-1])
-                # Append the html equivalent of the heading
-                html_content.append(
-                    f'<h{h_level}>{heading[1]}</h{h_level}>\n'
-                )
-            else:
-                html_content.append(line)
-
-    with open(output_file, 'w', encoding='utf-8') as file_2:
-        file_2.writelines(html_content)
+    convert_markdown_to_html(input_file, output_file)
